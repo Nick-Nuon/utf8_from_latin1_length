@@ -98,9 +98,9 @@ size_t avx2_utf8_length_mkl(const uint8_t *str, size_t len) {
 
 size_t avx512_utf8_length_mkl(const uint8_t *str, size_t len) {
   size_t answer = len / sizeof(__m512i) * sizeof(__m512i);
-  __m512i negative_ones = _mm512_set1_epi8(-1);
+  // __m512i negative_ones = _mm512_set1_epi8(-1);
   size_t i = 0;
-  __m512i four_64bits = _mm512_setzero_si512();
+  __m512i eight_64bits = _mm512_setzero_si512();
   while (i + sizeof(__m512i) <= len) {
     __m512i runner = _mm512_setzero_si512();
     // We can do up to 255 loops without overflow.
@@ -122,18 +122,21 @@ size_t avx512_utf8_length_mkl(const uint8_t *str, size_t len) {
                                                 mask, 
                                                 _mm512_setzero_si512(),
                                                 input); */
-      __m512i not_ascii = _mm512_mask_blend_epi8(mask, _mm512_setzero_si512(), negative_ones);
+     // __m512i not_ascii = _mm512_mask_blend_epi8(mask, _mm512_setzero_si512(), negative_ones);
+     __m512i not_ascii = _mm512_mask_set1_epi8(_mm512_setzero_si512(), mask, 0xFF);
+
+
       runner = _mm512_sub_epi8(runner, not_ascii);
       // runner = _mm512_sub_epi8(runner, blended); // we add the number of non-ASCII in blended to the runner
     }
-    four_64bits = _mm512_add_epi64(
-                                    four_64bits, 
+    eight_64bits = _mm512_add_epi64(
+                                    eight_64bits, 
                                     _mm512_sad_epu8(
                                                     runner,
                                                     _mm512_setzero_si512()));
   }
-  __m256i first_half = _mm512_extracti64x4_epi64(four_64bits, 0);
-  __m256i second_half = _mm512_extracti64x4_epi64(four_64bits, 1);
+  __m256i first_half = _mm512_extracti64x4_epi64(eight_64bits, 0);
+  __m256i second_half = _mm512_extracti64x4_epi64(eight_64bits, 1);
   answer += (size_t)_mm256_extract_epi64(first_half, 0) +
             (size_t)_mm256_extract_epi64(first_half, 1) +
             (size_t)_mm256_extract_epi64(first_half, 2) +
@@ -247,7 +250,7 @@ size_t avx512_utf8_length_mkl2(const uint8_t *str, size_t len) {
 
 int main() {
   size_t trials = 3;
-  size_t warm_trials = 3;
+  size_t warm_trials = 20;
 
   size_t N = 8000;
   uint8_t *input = new uint8_t[N];
