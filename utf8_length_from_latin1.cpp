@@ -129,7 +129,6 @@ size_t avx512_utf8_length_mkl(const uint8_t *str, size_t len) {
 
       runner = _mm512_sub_epi8(runner, not_ascii);
 
-
       // runner = _mm512_sub_epi8(runner, _mm512_set1_epi8(mask));
       // runner = _mm512_sub_epi8(runner, blended); // we add the number of non-ASCII in blended to the runner
     }
@@ -170,8 +169,8 @@ size_t avx2_utf8_length_mkl2(const uint8_t *str, size_t len) {
       __m256i input2 = _mm256_loadu_si256((const __m256i *)(str + i + sizeof(__m256i)));
       __m256i input3 = _mm256_loadu_si256((const __m256i *)(str + i + 2*sizeof(__m256i)));
       __m256i input4 = _mm256_loadu_si256((const __m256i *)(str + i + 3*sizeof(__m256i)));
-      __m256i input12 = _mm256_add_epi8( // add up the presence of non-null bytes in input 1 & 2 per byte element
-                                        _mm256_cmpgt_epi8( //check whether each byte is non-null
+      __m256i input12 = _mm256_add_epi8( // 
+                                        _mm256_cmpgt_epi8( // 256-bit vector where ASCII = 0xFF (or -1 in Two's complement),  non-ASCII = 0
                                                           _mm256_setzero_si256(), 
                                                           input1),
                                         _mm256_cmpgt_epi8( //do that for input 2 as well
@@ -267,6 +266,39 @@ size_t avx512_utf8_length_mkl2(const uint8_t *str, size_t len) {
             __m512i input2 = _mm512_loadu_si512((const __m512i *)(str + i + sizeof(__m512i)));
             __m512i input3 = _mm512_loadu_si512((const __m512i *)(str + i + 2*sizeof(__m512i)));
             __m512i input4 = _mm512_loadu_si512((const __m512i *)(str + i + 3*sizeof(__m512i)));
+/* 
+            __m512i input12 = _mm512_add_epi8( // add up the presence of ASCII bytes in input 1 & 2 per byte element
+                                              _mm512_mask_set1_epi8(_mm512_setzero_si512(),
+                                                                    _mm512_cmpgt_epi8_mask( // 64-bit mask where 1 = ASCII, 0 = non-ASCII
+                                                                                            _mm512_setzero_si512(),
+                                                                                            input1),
+                                                                    0xFF),
+                                                
+                                                _mm512_mask_set1_epi8(_mm512_setzero_si512(),
+                                                                    _mm512_cmpgt_epi8_mask( // 64-bit mask where 1 = ASCII, 0 = non-ASCII
+                                                                                            _mm512_setzero_si512(),
+                                                                                            input2),
+                                                                    0xFF)
+                                              );
+
+
+            __m512i input23 = _mm512_add_epi8( // add up the presence of ASCII bytes in input 1 & 2 per byte element
+                                              _mm512_mask_set1_epi8(_mm512_setzero_si512(),
+                                                                    _mm512_cmpgt_epi8_mask( // 64-bit mask where 1 = ASCII, 0 = non-ASCII
+                                                                                            _mm512_setzero_si512(),
+                                                                                            input3),
+                                                                    0xFF),
+                                                
+                                                _mm512_mask_set1_epi8(_mm512_setzero_si512(),
+                                                                    _mm512_cmpgt_epi8_mask( // 64-bit mask where 1 = ASCII, 0 = non-ASCII
+                                                                                            _mm512_setzero_si512(),
+                                                                                            input4),
+                                                                    0xFF)
+                                              );                                            
+
+            __m512i input1234 = _mm512_add_epi8(input12, input23);
+            runner = _mm512_sub_epi8(runner, input1234); // you have your runner
+ */
 
             // Generate four masks
             __mmask64 mask1 = _mm512_cmpgt_epi8_mask(_mm512_setzero_si512(), input1);
