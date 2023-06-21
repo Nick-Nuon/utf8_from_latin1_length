@@ -262,13 +262,28 @@ size_t avx512_utf8_length_mkl2(const uint8_t *str, size_t len) {
     }
     size_t max_i = i + iterations * sizeof(__m512i) - sizeof(__m512i);
     for (; i + 4*sizeof(__m512i) <= max_i; i += 4*sizeof(__m512i)) {
-      for (int j = 0; j < 4; j++) {
-        __m512i input = _mm512_loadu_si512((const __m512i *)(str + i + j*sizeof(__m512i)));
+            // Load four __m512i vectors
+            __m512i input1 = _mm512_loadu_si512((const __m512i *)(str + i));
+            __m512i input2 = _mm512_loadu_si512((const __m512i *)(str + i + sizeof(__m512i)));
+            __m512i input3 = _mm512_loadu_si512((const __m512i *)(str + i + 2*sizeof(__m512i)));
+            __m512i input4 = _mm512_loadu_si512((const __m512i *)(str + i + 3*sizeof(__m512i)));
 
-        __mmask64 mask = _mm512_cmpgt_epi8_mask(_mm512_setzero_si512(), input);
-        __m512i not_ascii = _mm512_mask_set1_epi8(_mm512_setzero_si512(), mask, 0xFF);
-        runner = _mm512_sub_epi8(runner, not_ascii);
-      }
+            // Generate four masks
+            __mmask64 mask1 = _mm512_cmpgt_epi8_mask(_mm512_setzero_si512(), input1);
+            __mmask64 mask2 = _mm512_cmpgt_epi8_mask(_mm512_setzero_si512(), input2);
+            __mmask64 mask3 = _mm512_cmpgt_epi8_mask(_mm512_setzero_si512(), input3);
+            __mmask64 mask4 = _mm512_cmpgt_epi8_mask(_mm512_setzero_si512(), input4);
+
+            // Apply the masks and subtract from the runner
+            __m512i not_ascii1 = _mm512_mask_set1_epi8(_mm512_setzero_si512(), mask1, 0xFF);
+            __m512i not_ascii2 = _mm512_mask_set1_epi8(_mm512_setzero_si512(), mask2, 0xFF);
+            __m512i not_ascii3 = _mm512_mask_set1_epi8(_mm512_setzero_si512(), mask3, 0xFF);
+            __m512i not_ascii4 = _mm512_mask_set1_epi8(_mm512_setzero_si512(), mask4, 0xFF);
+
+            runner = _mm512_sub_epi8(runner, not_ascii1);
+            runner = _mm512_sub_epi8(runner, not_ascii2);
+            runner = _mm512_sub_epi8(runner, not_ascii3);
+            runner = _mm512_sub_epi8(runner, not_ascii4);
     }
 
     for (; i <= max_i; i += sizeof(__m512i)) {
