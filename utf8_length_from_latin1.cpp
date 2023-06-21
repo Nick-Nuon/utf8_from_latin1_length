@@ -123,10 +123,14 @@ size_t avx512_utf8_length_mkl(const uint8_t *str, size_t len) {
                                                 _mm512_setzero_si512(),
                                                 input); */
      // __m512i not_ascii = _mm512_mask_blend_epi8(mask, _mm512_setzero_si512(), negative_ones);
+     
      __m512i not_ascii = _mm512_mask_set1_epi8(_mm512_setzero_si512(), mask, 0xFF);
-
+    //  __m512i not_ascii = _mm512_and_si512(_mm512_set1_epi8(0xFF), _mm512_movm_epi8(mask));
 
       runner = _mm512_sub_epi8(runner, not_ascii);
+
+
+      // runner = _mm512_sub_epi8(runner, _mm512_set1_epi8(mask));
       // runner = _mm512_sub_epi8(runner, blended); // we add the number of non-ASCII in blended to the runner
     }
     eight_64bits = _mm512_add_epi64(
@@ -204,7 +208,7 @@ size_t avx2_utf8_length_mkl2(const uint8_t *str, size_t len) {
 }
 
 #include <immintrin.h>
-
+/* 
 size_t avx512_utf8_length_mkl2(const uint8_t *str, size_t len) {
   size_t answer = len / sizeof(__m512i) * sizeof(__m512i);
   size_t i = 0;
@@ -244,8 +248,52 @@ size_t avx512_utf8_length_mkl2(const uint8_t *str, size_t len) {
   }
   answer += _mm512_reduce_add_epi64(eight_64bits);
   return answer + scalar_utf8_length(str + i, len - i);
-}
+} */
 
+size_t avx512_utf8_length_mkl2(const uint8_t *str, size_t len) {
+  size_t answer = len / sizeof(__m512i) * sizeof(__m512i);
+  size_t i = 0;
+  __m512i eight_64bits = _mm512_setzero_si512();
+  while (i + sizeof(__m512i) <= len) {
+    __m512i runner = _mm512_setzero_si512();
+    size_t iterations = (len - i) / sizeof(__m512i);
+    if (iterations > 255) {
+      iterations = 255;
+    }
+    size_t max_i = i + iterations * sizeof(__m512i) - sizeof(__m512i);
+    for (; i + 4*sizeof(__m512i) <= max_i; i += 4*sizeof(__m512i)) {
+      for (int j = 0; j < 4; j++) {
+        __m512i input = _mm512_loadu_si512((const __m512i *)(str + i + j*sizeof(__m512i)));
+
+        __mmask64 mask = _mm512_cmpgt_epi8_mask(_mm512_setzero_si512(), input);
+        __m512i not_ascii = _mm512_mask_set1_epi8(_mm512_setzero_si512(), mask, 0xFF);
+        runner = _mm512_sub_epi8(runner, not_ascii);
+      }
+    }
+
+    for (; i <= max_i; i += sizeof(__m512i)) {
+      __m512i input = _mm512_loadu_si512((const __m512i *)(str + i));
+
+      __mmask64 mask = _mm512_cmpgt_epi8_mask(_mm512_setzero_si512(), input);
+      __m512i not_ascii = _mm512_mask_set1_epi8(_mm512_setzero_si512(), mask, 0xFF);
+      runner = _mm512_sub_epi8(runner, not_ascii);
+    }
+
+    eight_64bits = _mm512_add_epi64(eight_64bits, _mm512_sad_epu8(runner, _mm512_setzero_si512()));
+  }
+
+  __m256i first_half = _mm512_extracti64x4_epi64(eight_64bits, 0);
+  __m256i second_half = _mm512_extracti64x4_epi64(eight_64bits, 1);
+  answer += (size_t)_mm256_extract_epi64(first_half, 0) +
+            (size_t)_mm256_extract_epi64(first_half, 1) +
+            (size_t)_mm256_extract_epi64(first_half, 2) +
+            (size_t)_mm256_extract_epi64(first_half, 3) +
+            (size_t)_mm256_extract_epi64(second_half, 0) +
+            (size_t)_mm256_extract_epi64(second_half, 1) +
+            (size_t)_mm256_extract_epi64(second_half, 2) +
+            (size_t)_mm256_extract_epi64(second_half, 3);
+  return answer + scalar_utf8_length(str + i, len - i);
+}
 
 
 int main() {
