@@ -27,6 +27,84 @@ size_t scalar_utf8_length(const uint8_t *c, size_t len) {
   return answer + len;
 }
 
+size_t sse_utf8_length_mkl(const uint8_t *str, size_t len) {
+    size_t answer = len / sizeof(__m128i) * sizeof(__m128i); 
+    size_t i = 0; 
+    __m128i two_64bits = _mm_setzero_si128(); 
+    while (i + sizeof(__m128i) <= len) { 
+        __m128i runner = _mm_setzero_si128(); 
+
+        size_t iterations = (len - i) / sizeof(__m128i); 
+        if (iterations > 255) {
+            iterations = 255;
+        }
+        size_t max_i = i + iterations * sizeof(__m128i) - sizeof(__m128i);
+
+        for (; i <= max_i; i += sizeof(__m128i)) { 
+            __m128i input = _mm_loadu_si128((const __m128i *)(str + i)); 
+            runner = _mm_sub_epi8(
+                runner, 
+                _mm_cmpgt_epi8(_mm_setzero_si128(), input));
+        }
+
+        two_64bits = _mm_add_epi64(
+            two_64bits, 
+            _mm_sad_epu8(runner, _mm_setzero_si128()));
+    }
+
+    answer += _mm_extract_epi64(two_64bits, 0) +
+              _mm_extract_epi64(two_64bits, 1);
+
+    return answer + scalar_utf8_length(str + i, len - i); 
+}
+
+size_t sse_utf8_length_mkl2(const uint8_t *str, size_t len) {
+  size_t answer = len / sizeof(__m128i) * sizeof(__m128i);
+  size_t i = 0;
+  __m128i two_64bits = _mm_setzero_si128();
+  while (i + sizeof(__m128i) <= len) {
+    __m128i runner = _mm_setzero_si128();
+    size_t iterations = (len - i) / sizeof(__m128i);
+    if (iterations > 255) {
+      iterations = 255;
+    }
+    size_t max_i = i + iterations * sizeof(__m128i) - sizeof(__m128i);
+    for (; i + 4*sizeof(__m128i) <= max_i; i += 4*sizeof(__m128i)) {
+      __m128i input1 = _mm_loadu_si128((const __m128i *)(str + i));
+      __m128i input2 = _mm_loadu_si128((const __m128i *)(str + i + sizeof(__m128i)));
+      __m128i input3 = _mm_loadu_si128((const __m128i *)(str + i + 2*sizeof(__m128i)));
+      __m128i input4 = _mm_loadu_si128((const __m128i *)(str + i + 3*sizeof(__m128i)));
+      __m128i input12 = _mm_add_epi8(
+                                      _mm_cmpgt_epi8(
+                                                    _mm_setzero_si128(), 
+                                                    input1),
+                                      _mm_cmpgt_epi8(
+                                                    _mm_setzero_si128(),
+                                                    input2));
+      __m128i input34 = _mm_add_epi8(
+                                      _mm_cmpgt_epi8(
+                                                    _mm_setzero_si128(),
+                                                    input3),
+                                      _mm_cmpgt_epi8(
+                                                    _mm_setzero_si128(),
+                                                    input4));
+      __m128i input1234 = _mm_add_epi8(input12, input34);
+      runner = _mm_sub_epi8(runner, input1234);
+    }
+    for (; i <= max_i; i += sizeof(__m128i)) {
+      __m128i input = _mm_loadu_si128((const __m128i *)(str + i));
+      runner = _mm_sub_epi8(
+          runner, _mm_cmpgt_epi8(_mm_setzero_si128(), input));
+    }
+    two_64bits = _mm_add_epi64(
+        two_64bits, _mm_sad_epu8(runner, _mm_setzero_si128()));
+  }
+  answer += _mm_extract_epi64(two_64bits, 0) +
+            _mm_extract_epi64(two_64bits, 1);
+  return answer + scalar_utf8_length(str + i, len - i);
+}
+
+
 size_t avx2_utf8_length_basic(const uint8_t *str, size_t len) {
   size_t answer = len / sizeof(__m256i) * sizeof(__m256i);
   size_t i;
@@ -96,60 +174,6 @@ size_t avx2_utf8_length_mkl(const uint8_t *str, size_t len) {
   return answer + scalar_utf8_length(str + i, len - i); //and use scalar to return the rest
 }
 
-size_t avx512_utf8_length_mkl(const uint8_t *str, size_t len) {
-  size_t answer = len / sizeof(__m512i) * sizeof(__m512i);
-  // __m512i negative_ones = _mm512_set1_epi8(-1);
-  size_t i = 0;
-  __m512i eight_64bits = _mm512_setzero_si512();
-  while (i + sizeof(__m512i) <= len) {
-    __m512i runner = _mm512_setzero_si512();
-    // We can do up to 255 loops without overflow.
-    size_t iterations = (len - i) / sizeof(__m512i);
-    if (iterations > 255) {
-      iterations = 255;
-    }
-    size_t max_i = i + iterations * sizeof(__m512i) - sizeof(__m512i);
-    for (; i <= max_i; i += sizeof(__m512i)) {
-      __m512i input = _mm512_loadu_si512((const __m512i *)(str + i));
-
-      __mmask64 mask = _mm512_cmpgt_epi8_mask(//  Pack in 64-bit unit. 
-                                              // If the input byte is positive(ASCII), return 1
-                                              //  else if non-ASCII return 0.
-                                              _mm512_setzero_si512(),
-                                              input //input is negative (leading bit is 1 under two compleements) => not an ASCII
-                                              );
-/*       __m512i blended = _mm512_mask_blend_epi8( // process by chunks of 8 bits, retain only the chunks of input that are masked (not ASCII)
-                                                mask, 
-                                                _mm512_setzero_si512(),
-                                                input); */
-     // __m512i not_ascii = _mm512_mask_blend_epi8(mask, _mm512_setzero_si512(), negative_ones);
-     
-     __m512i not_ascii = _mm512_mask_set1_epi8(_mm512_setzero_si512(), mask, 0xFF);
-    //  __m512i not_ascii = _mm512_and_si512(_mm512_set1_epi8(0xFF), _mm512_movm_epi8(mask));
-
-      runner = _mm512_sub_epi8(runner, not_ascii);
-
-      // runner = _mm512_sub_epi8(runner, _mm512_set1_epi8(mask));
-      // runner = _mm512_sub_epi8(runner, blended); // we add the number of non-ASCII in blended to the runner
-    }
-    eight_64bits = _mm512_add_epi64(
-                                    eight_64bits, 
-                                    _mm512_sad_epu8(
-                                                    runner,
-                                                    _mm512_setzero_si512()));
-  }
-  __m256i first_half = _mm512_extracti64x4_epi64(eight_64bits, 0);
-  __m256i second_half = _mm512_extracti64x4_epi64(eight_64bits, 1);
-  answer += (size_t)_mm256_extract_epi64(first_half, 0) +
-            (size_t)_mm256_extract_epi64(first_half, 1) +
-            (size_t)_mm256_extract_epi64(first_half, 2) +
-            (size_t)_mm256_extract_epi64(first_half, 3) +
-            (size_t)_mm256_extract_epi64(second_half, 0) +
-            (size_t)_mm256_extract_epi64(second_half, 1) +
-            (size_t)_mm256_extract_epi64(second_half, 2) +
-            (size_t)_mm256_extract_epi64(second_half, 3);
-  return answer + scalar_utf8_length(str + i, len - i);
-}
 
 size_t avx2_utf8_length_mkl2(const uint8_t *str, size_t len) {
   size_t answer = len / sizeof(__m256i) * sizeof(__m256i); //get how many m256i fits into the len
@@ -206,48 +230,61 @@ size_t avx2_utf8_length_mkl2(const uint8_t *str, size_t len) {
   return answer + scalar_utf8_length(str + i, len - i);
 }
 
-#include <immintrin.h>
-/* 
-size_t avx512_utf8_length_mkl2(const uint8_t *str, size_t len) {
+size_t avx512_utf8_length_mkl(const uint8_t *str, size_t len) {
   size_t answer = len / sizeof(__m512i) * sizeof(__m512i);
+  // __m512i negative_ones = _mm512_set1_epi8(-1);
   size_t i = 0;
   __m512i eight_64bits = _mm512_setzero_si512();
   while (i + sizeof(__m512i) <= len) {
     __m512i runner = _mm512_setzero_si512();
-    // We can do up to 511 loops without overflow.
+    // We can do up to 255 loops without overflow.
     size_t iterations = (len - i) / sizeof(__m512i);
-    if (iterations > 511) {
-      iterations = 511;
+    if (iterations > 255) {
+      iterations = 255;
     }
-    //bytes we've read + how many  - current 512 bits block we're reading
     size_t max_i = i + iterations * sizeof(__m512i) - sizeof(__m512i);
-    for (; i + 4*sizeof(__m512i) <= max_i; i += 4*sizeof(__m512i)) {
-      __m512i input1 = _mm512_loadu_si512((const __m512i *)(str + i));
-      __m512i input2 = _mm512_loadu_si512((const __m512i *)(str + i + sizeof(__m512i)));
-      __m512i input3 = _mm512_loadu_si512((const __m512i *)(str + i + 2*sizeof(__m512i)));
-      __m512i input4 = _mm512_loadu_si512((const __m512i *)(str + i + 3*sizeof(__m512i)));
-      __m512i input12 = _mm512_add_epi8(_mm512_movm_epi8(
-                                                        _mm512_cmpgt_epi8_mask(
-                                                                                input1,
-                                                                                _mm512_setzero_si512())),
-                                        _mm512_movm_epi8(
-                                                          _mm512_cmpgt_epi8_mask(
-                                                                                input2, 
-                                                                                _mm512_setzero_si512())));
-      __m512i input23 = _mm512_add_epi8(_mm512_movm_epi8(_mm512_cmpgt_epi8_mask(input3, _mm512_setzero_si512())),
-                                        _mm512_movm_epi8(_mm512_cmpgt_epi8_mask(input4, _mm512_setzero_si512())));
-      __m512i input1234 = _mm512_add_epi8(input12, input23);
-      runner = _mm512_sub_epi8(runner, input1234);
-    }
     for (; i <= max_i; i += sizeof(__m512i)) {
       __m512i input = _mm512_loadu_si512((const __m512i *)(str + i));
-      runner = _mm512_sub_epi8(runner, _mm512_movm_epi8(_mm512_cmpgt_epi8_mask(input, _mm512_setzero_si512())));
+
+      __mmask64 mask = _mm512_cmpgt_epi8_mask(//  Pack in 64-bit unit. 
+                                              // If the input byte is positive(ASCII), return 1
+                                              //  else if non-ASCII return 0.
+                                              _mm512_setzero_si512(),
+                                              input //input is negative (leading bit is 1 under two compleements) => not an ASCII
+                                              );
+/*       __m512i blended = _mm512_mask_blend_epi8( // process by chunks of 8 bits, retain only the chunks of input that are masked (not ASCII)
+                                                mask, 
+                                                _mm512_setzero_si512(),
+                                                input); */
+     // __m512i not_ascii = _mm512_mask_blend_epi8(mask, _mm512_setzero_si512(), negative_ones);
+     
+     __m512i not_ascii = _mm512_mask_set1_epi8(_mm512_setzero_si512(), mask, 0xFF);
+    //  __m512i not_ascii = _mm512_and_si512(_mm512_set1_epi8(0xFF), _mm512_movm_epi8(mask));
+
+      runner = _mm512_sub_epi8(runner, not_ascii);
+
+      // runner = _mm512_sub_epi8(runner, _mm512_set1_epi8(mask));
+      // runner = _mm512_sub_epi8(runner, blended); // we add the number of non-ASCII in blended to the runner
     }
-    eight_64bits = _mm512_add_epi64(eight_64bits, _mm512_sad_epu8(runner, _mm512_setzero_si512()));
+    eight_64bits = _mm512_add_epi64(
+                                    eight_64bits, 
+                                    _mm512_sad_epu8(
+                                                    runner,
+                                                    _mm512_setzero_si512()));
   }
-  answer += _mm512_reduce_add_epi64(eight_64bits);
+  __m256i first_half = _mm512_extracti64x4_epi64(eight_64bits, 0);
+  __m256i second_half = _mm512_extracti64x4_epi64(eight_64bits, 1);
+  answer += (size_t)_mm256_extract_epi64(first_half, 0) +
+            (size_t)_mm256_extract_epi64(first_half, 1) +
+            (size_t)_mm256_extract_epi64(first_half, 2) +
+            (size_t)_mm256_extract_epi64(first_half, 3) +
+            (size_t)_mm256_extract_epi64(second_half, 0) +
+            (size_t)_mm256_extract_epi64(second_half, 1) +
+            (size_t)_mm256_extract_epi64(second_half, 2) +
+            (size_t)_mm256_extract_epi64(second_half, 3);
   return answer + scalar_utf8_length(str + i, len - i);
-} */
+}
+
 
 size_t avx512_utf8_length_mkl2(const uint8_t *str, size_t len) {
   size_t answer = len / sizeof(__m512i) * sizeof(__m512i);
@@ -260,13 +297,31 @@ size_t avx512_utf8_length_mkl2(const uint8_t *str, size_t len) {
       iterations = 255;
     }
     size_t max_i = i + iterations * sizeof(__m512i) - sizeof(__m512i);
+    // for (; i + 8*sizeof(__m512i) <= max_i; i += 8*sizeof(__m512i)) {
     for (; i + 4*sizeof(__m512i) <= max_i; i += 4*sizeof(__m512i)) {
             // Load four __m512i vectors
             __m512i input1 = _mm512_loadu_si512((const __m512i *)(str + i));
             __m512i input2 = _mm512_loadu_si512((const __m512i *)(str + i + sizeof(__m512i)));
             __m512i input3 = _mm512_loadu_si512((const __m512i *)(str + i + 2*sizeof(__m512i)));
             __m512i input4 = _mm512_loadu_si512((const __m512i *)(str + i + 3*sizeof(__m512i)));
-/* 
+
+/*             // Generate four masks
+            __mmask64 mask1 = _mm512_cmpgt_epi8_mask(_mm512_setzero_si512(), input1);
+            __mmask64 mask2 = _mm512_cmpgt_epi8_mask(_mm512_setzero_si512(), input2);
+            __mmask64 mask3 = _mm512_cmpgt_epi8_mask(_mm512_setzero_si512(), input3);
+            __mmask64 mask4 = _mm512_cmpgt_epi8_mask(_mm512_setzero_si512(), input4);
+            // Apply the masks and subtract from the runner
+            __m512i not_ascii1 = _mm512_mask_set1_epi8(_mm512_setzero_si512(), mask1, 0xFF);
+            __m512i not_ascii2 = _mm512_mask_set1_epi8(_mm512_setzero_si512(), mask2, 0xFF);
+            __m512i not_ascii3 = _mm512_mask_set1_epi8(_mm512_setzero_si512(), mask3, 0xFF);
+            __m512i not_ascii4 = _mm512_mask_set1_epi8(_mm512_setzero_si512(), mask4, 0xFF);
+
+            runner = _mm512_sub_epi8(runner, not_ascii1);
+            runner = _mm512_sub_epi8(runner, not_ascii2);
+            runner = _mm512_sub_epi8(runner, not_ascii3);
+            runner = _mm512_sub_epi8(runner, not_ascii4); */
+
+
             __m512i input12 = _mm512_add_epi8( // add up the presence of ASCII bytes in input 1 & 2 per byte element
                                               _mm512_mask_set1_epi8(_mm512_setzero_si512(),
                                                                     _mm512_cmpgt_epi8_mask( // 64-bit mask where 1 = ASCII, 0 = non-ASCII
@@ -298,24 +353,8 @@ size_t avx512_utf8_length_mkl2(const uint8_t *str, size_t len) {
 
             __m512i input1234 = _mm512_add_epi8(input12, input23);
             runner = _mm512_sub_epi8(runner, input1234); // you have your runner
- */
 
-            // Generate four masks
-            __mmask64 mask1 = _mm512_cmpgt_epi8_mask(_mm512_setzero_si512(), input1);
-            __mmask64 mask2 = _mm512_cmpgt_epi8_mask(_mm512_setzero_si512(), input2);
-            __mmask64 mask3 = _mm512_cmpgt_epi8_mask(_mm512_setzero_si512(), input3);
-            __mmask64 mask4 = _mm512_cmpgt_epi8_mask(_mm512_setzero_si512(), input4);
 
-            // Apply the masks and subtract from the runner
-            __m512i not_ascii1 = _mm512_mask_set1_epi8(_mm512_setzero_si512(), mask1, 0xFF);
-            __m512i not_ascii2 = _mm512_mask_set1_epi8(_mm512_setzero_si512(), mask2, 0xFF);
-            __m512i not_ascii3 = _mm512_mask_set1_epi8(_mm512_setzero_si512(), mask3, 0xFF);
-            __m512i not_ascii4 = _mm512_mask_set1_epi8(_mm512_setzero_si512(), mask4, 0xFF);
-
-            runner = _mm512_sub_epi8(runner, not_ascii1);
-            runner = _mm512_sub_epi8(runner, not_ascii2);
-            runner = _mm512_sub_epi8(runner, not_ascii3);
-            runner = _mm512_sub_epi8(runner, not_ascii4);
     }
 
     for (; i <= max_i; i += sizeof(__m512i)) {
@@ -345,7 +384,7 @@ size_t avx512_utf8_length_mkl2(const uint8_t *str, size_t len) {
 
 int main() {
   size_t trials = 3;
-  size_t warm_trials = 20;
+  size_t warm_trials = 80;
 
   size_t N = 8000;
   uint8_t *input = new uint8_t[N];
@@ -392,6 +431,49 @@ int main() {
   if(len != expected) { abort(); }
 
   std::cout << std::endl;
+
+      std::cout << std::endl;
+  std::cout << "SSE (mkl 1)" << std::endl;
+  for (size_t t = 0; t < trials + warm_trials; t++) {
+    linux_events.start();
+    len = sse_utf8_length_mkl(input, N);
+    linux_events.end(results);
+    if (t >= warm_trials) {
+      std::cout << "cycles/bytes " << double(results[0]) / (len) << " ";
+      std::cout << "instructions/bytes " << double(results[1]) / (len) << " ";
+      std::cout << "instructions/cycle " << double(results[1]) / results[0]
+                << std::endl;
+    }
+  }
+  if(len != expected) { 
+    std::cout << "Problem!" << std::endl;
+    std::cout << "len: " << len << " Expected: " << expected << std::endl;
+    // abort(); 
+    }
+
+  std::cout << std::endl;
+
+      std::cout << std::endl;
+  std::cout << "SSE (mkl 2)" << std::endl;
+  for (size_t t = 0; t < trials + warm_trials; t++) {
+    linux_events.start();
+    len = sse_utf8_length_mkl2(input, N);
+    linux_events.end(results);
+    if (t >= warm_trials) {
+      std::cout << "cycles/bytes " << double(results[0]) / (len) << " ";
+      std::cout << "instructions/bytes " << double(results[1]) / (len) << " ";
+      std::cout << "instructions/cycle " << double(results[1]) / results[0]
+                << std::endl;
+    }
+  }
+  if(len != expected) { 
+    std::cout << "Problem!" << std::endl;
+    std::cout << "len: " << len << " Expected: " << expected << std::endl;
+    // abort(); 
+    }
+
+  std::cout << std::endl;
+
 
   std::cout << "avx2 (basic)" << std::endl;
   for (size_t t = 0; t < trials + warm_trials; t++) {
@@ -490,5 +572,7 @@ int main() {
   #endif
 
   std::cout << std::endl;
+
+
   return EXIT_SUCCESS;
 }
