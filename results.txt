@@ -1,0 +1,47 @@
+scalar (no autovec)
+cycles/bytes 1.00175 instructions/bytes 3.34556 instructions/cycle 3.3397
+cycles/bytes 1.0102 instructions/bytes 3.34556 instructions/cycle 3.3118
+cycles/bytes 1.01103 instructions/bytes 3.34556 instructions/cycle 3.30906
+
+scalar
+cycles/bytes 0.447852 instructions/bytes 0.712686 instructions/cycle 1.59134
+cycles/bytes 0.449189 instructions/bytes 0.712686 instructions/cycle 1.5866
+cycles/bytes 0.449106 instructions/bytes 0.712686 instructions/cycle 1.5869
+
+
+SSE (mkl 1)
+cycles/bytes 0.083988 instructions/bytes 0.298596 instructions/cycle 3.55522
+cycles/bytes 0.0992813 instructions/bytes 0.298596 instructions/cycle 3.00758
+cycles/bytes 0.0988634 instructions/bytes 0.298596 instructions/cycle 3.02029
+
+
+SSE (mkl 2)
+cycles/bytes 0.04237 instructions/bytes 0.119087 instructions/cycle 2.81065
+cycles/bytes 0.0436236 instructions/bytes 0.119087 instructions/cycle 2.72989
+cycles/bytes 0.0432057 instructions/bytes 0.119087 instructions/cycle 2.75629
+
+avx2 (basic)
+cycles/bytes 0.0677754 instructions/bytes 0.148755 instructions/cycle 2.19482
+cycles/bytes 0.066689 instructions/bytes 0.148755 instructions/cycle 2.23058
+cycles/bytes 0.0699482 instructions/bytes 0.148755 instructions/cycle 2.12664
+
+avx2 (mkl)
+cycles/bytes 0.0520642 instructions/bytes 0.151262 instructions/cycle 2.9053
+cycles/bytes 0.0558248 instructions/bytes 0.151262 instructions/cycle 2.70958
+cycles/bytes 0.0549056 instructions/bytes 0.151262 instructions/cycle 2.75495
+
+avx2 (mkl 2)
+cycles/bytes 0.0320074 instructions/bytes 0.0676082 instructions/cycle 2.11227
+cycles/bytes 0.0325923 instructions/bytes 0.0676082 instructions/cycle 2.07436
+cycles/bytes 0.0326759 instructions/bytes 0.0676082 instructions/cycle 2.06905
+
+avx512 (mkl 1)
+cycles/bytes 0.0345145 instructions/bytes 0.0892529 instructions/cycle 2.58596
+cycles/bytes 0.0347652 instructions/bytes 0.0892529 instructions/cycle 2.56731
+cycles/bytes 0.0348487 instructions/bytes 0.0892529 instructions/cycle 2.56115
+
+
+avx512 (mkl 2)
+cycles/bytes 0.0302524 instructions/bytes 0.0478857 instructions/cycle 1.58287
+cycles/bytes 0.0330102 instructions/bytes 0.0478857 instructions/cycle 1.45063
+cycles/bytes 0.0329266 instructions/bytes 0.0478857 instructions/cycle 1.45431
